@@ -1,4 +1,6 @@
 import os
+import time
+from functools import wraps
 from typing import TypedDict, Literal
 from langgraph.graph import StateGraph,END 
 from langchain_openai import ChatOpenAI
@@ -8,7 +10,6 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-os.environ["OPENAI_API_KEY"] ="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"
 llm = ChatOpenAI(
     model = "gpt-3.5-turbo",
     temperature = 0.5
