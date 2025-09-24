@@ -1,6 +1,6 @@
 import os
 from typing import TypedDict, Literal
-from langgraph.graph import StateGraph,END ,START
+from langgraph.graph import StateGraph,END 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage,SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
+os.environ["OPENAI_API_KEY"] ="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"
 llm = ChatOpenAI(
     model = "gpt-3.5-turbo",
     temperature = 0.5
@@ -18,6 +19,8 @@ class jokeState(TypedDict):
     joke:str
     rating:str
     feedback:str
+    joke_history:list
+    attempt_count:int
 
 def generate_joke_withllm(state:jokeState)-> dict:
     messages = [
@@ -92,12 +95,15 @@ def should_improve(state:jokeState)->Literal["improve", "done"]:
         return "done"
 
 def create_jokegraph():
+    checkpointer = MemorySaver()
     graph = StateGraph(jokeState)
     graph.add_node("joke_generator",generate_joke_withllm)
+    graph.add_node("check_duplicate",check_duplicate)
     graph.add_node("joke_rating",rate_joke_with_llm)
     graph.add_node("joke_improver",improve_joke_withllm)
     graph.set_entry_point("joke_generator")
-    graph.add_edge("joke_generator","joke_rating")
+    graph.add_edge("joke_generator","check_duplicate")
+    graph.add_edge("check_duplicate","joke_rating")
 
     graph.add_conditional_edges (
         "joke_rating",
@@ -108,12 +114,24 @@ def create_jokegraph():
     )
     graph.add_edge("joke_improver","joke_rating")
 
-    app = graph.compile()
+    app = graph.compile(checkpointer=checkpointer)
     # print("\n🔍 Graph Structure:")
     # print("Nodes:", list(app.get_graph().nodes.keys()))
     # print("Edges:", app.get_graph().edges)
 
     return app
+
+def check_duplicate(state: jokeState)->dict:
+    current_joke = state['joke']
+    history= state.get('joke_history',[])
+    if current_joke in history:
+        print("duplicate joke detected")
+        return {"rating":"1/10"}
+    else:
+        history.append(current_joke)
+        attempt_count = state.get("attempt_count",0) +1
+        return {"joke_history":history,"attempt_count" :attempt_count}
+
 
 if __name__ == "__main__":
     print("langraph joke generator 2 node ----")
@@ -129,15 +147,17 @@ if __name__ == "__main__":
         "topic": topic,
         "joke": "",
         "rating": "",
-        "feedback": ""
+        "feedback": "",
+        "joke_history":[],
+        "attempt_count":0
     }
     
     print(f"\n🎬 Generating joke about '{topic}'...\n")
     
     # Stream the process
     # Stream returns a dictionary with node names as keys
-    for chunk in app.stream(initial_state):
-        # Each chunk is a dictionary with {node_name: state_update}
+    config = {"configurable": {"thread_id": "joke_session_001"}}
+    for chunk in app.stream(initial_state, config):      
         for node_name, state_update in chunk.items():
             print(f"\n📍 Node executed: {node_name}")
             if state_update:
@@ -146,7 +166,7 @@ if __name__ == "__main__":
                         print(f"   {key}: {str(value)[:100]}...")
     
     # Final result
-    result = app.invoke(initial_state)
+    result = app.invoke(initial_state,config)
     
     print("\n" + "="*50)
     print("🎉 FINAL JOKE:")
